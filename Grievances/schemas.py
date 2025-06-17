@@ -1,13 +1,24 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional, List
 
 class GrievanceCreate(BaseModel):
     grievance: str
-    greviance_id: int
+    greviance_id: Optional[int] = None
     user_id: int
     role: str
     department_id: int
+    files: Optional[List[bytes]] = None
 
+class AttachmentBase(BaseModel):
+        file_name: str
+        file_type: str
+        file_size: int
+
+class AttachmentResponse(AttachmentBase):
+    id: int
+    file_url: str  # URL to access the file
+    uploaded_at: datetime
 
 class GrievanceUpdate(BaseModel):
     grievance: str | None = None
@@ -22,6 +33,13 @@ class GrievanceOut(BaseModel):
     assigned_to: int | None
     status: str
     created_at: datetime
+    attachments: List[AttachmentResponse] = []
+
+    class Config:
+        orm_mode = True
+
+class AttachmentCreate(AttachmentBase):
+    file_content: bytes
 
     class Config:
         orm_mode = True

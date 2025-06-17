@@ -29,3 +29,18 @@ class Grievance(Base):
     department = relationship("Department")
     employee = relationship("User", foreign_keys=[assigned_to])
     resolver = relationship("User", foreign_keys=[resolved_by])
+    attachments = relationship("GrievanceAttachment", back_populates="grievance", cascade="all, delete-orphan")
+
+class GrievanceAttachment(Base):
+    __tablename__ = "grievance_attachments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    grievance_id = Column(Integer, ForeignKey("grievances.id", ondelete="CASCADE"), nullable=False)
+    file_path = Column(String, nullable=False)  # Path where the file is stored
+    file_name = Column(String, nullable=False)  # Original file name
+    file_type = Column(String, nullable=False)  # MIME type
+    file_size = Column(Integer, nullable=False)  # File size in bytes
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship to grievance
+    grievance = relationship("Grievance", back_populates="attachments")
