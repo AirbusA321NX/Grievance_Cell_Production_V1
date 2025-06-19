@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException , status
 from sqlalchemy.orm import Session
 from typing import List, Union
 import traceback
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 # Only admin, employee, super_admin can create users
 role_admin_employee_super = RoleChecker([Role.admin, Role.employee, Role.super_admin])
+role_admin = RoleChecker([Role.admin, Role.super_admin])  # Add this line
 
 @router.post("/", response_model=schemas.UserFull, operation_id="create_new_user")
 def create_user(
@@ -65,3 +66,40 @@ def read_user(
         return schemas.UserLimited.from_orm(user)
 
     raise HTTPException(status_code=403, detail="Not authorized")
+
+
+@router.patch("/{user_id}/role", response_model=schemas.UserFull, operation_id="update_user_role")
+def update_user_role(
+        user_id: int,
+        role_update: schemas.UserRoleUpdate,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(role_admin)  # Only admin can change roles
+):
+    """
+    Update a user's role.
+    Only accessible by admins.
+    """
+    # Check if target user exists
+    db_user = crud.get_user(db, user_id=user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent modifying super_admin users unless current user is super_admin
+    if db_user.role == Role.super_admin and current_user.role != Role.super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admin can modify other super admins"
+        )
+
+    # Prevent promoting to super_admin unless current user is super_admin
+    if role_update.role == Role.super_admin and current_user.role != Role.super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admin can create other super admins"
+        )
+
+    # Update the role
+    db_user.role = role_update.role
+    db.commit()
+    db.refresh(db_user)
+    return db_user
