@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException , status
 from sqlalchemy.orm import Session
 from typing import List, Union
 import traceback
-from User import crud, schemas, models
+from User import crud
 from database import get_db
 from dependencies import get_current_active_user, RoleChecker
 from roles import RoleEnum as Role
+from Grievances import models, schemas
+from . import models, schemas
+from sqlalchemy.orm import joinedload
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -68,6 +71,43 @@ def read_user(
     raise HTTPException(status_code=403, detail="Not authorized")
 
 
+@router.get("/grievances", response_model=List[schemas.GrievanceOut])
+def list_grievances(
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user),
+        skip: int = 0,
+        limit: int = 100
+):
+    """
+    List grievances based on user role:
+    - Super Admin: All grievances
+    - Admin: All grievances in their department
+    - Employee: Assigned grievances in their department
+    - User: Only their own grievances
+    """
+    query = db.query(models.Grievance)
+
+    # Apply filters based on user role
+    if current_user.role == Role.user:
+        query = query.filter(models.Grievance.user_id == current_user.id)
+    elif current_user.role == Role.employee:
+        query = query.filter(
+            (models.Grievance.department_id == current_user.department_id) &
+            (models.Grievance.assigned_to == current_user.id)
+        )
+    elif current_user.role == Role.admin:
+        query = query.filter(models.Grievance.department_id == current_user.department_id)
+    # Super admin can see all grievances, no additional filter needed
+
+    # Include related data
+    query = query.options(
+        joinedload(models.Grievance.user),
+        joinedload(models.Grievance.department),
+        joinedload(models.Grievance.assigned_to_user),
+        joinedload(models.Grievance.attachments)
+    ).order_by(models.Grievance.created_at.desc())
+
+    return query.offset(skip).limit(limit).all()
 @router.patch("/{user_id}/role", response_model=schemas.UserFull, operation_id="update_user_role")
 def update_user_role(
         user_id: int,

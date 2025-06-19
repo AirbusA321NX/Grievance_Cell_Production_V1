@@ -5,6 +5,7 @@ from .models import GrievanceStatus
 from roles import RoleEnum
 import uuid
 import datetime
+import random
 
 def create_grievance(db: Session, grievance: schemas.GrievanceCreate, user_id: int):
     # Generate unique ticket ID
@@ -22,16 +23,30 @@ def create_grievance(db: Session, grievance: schemas.GrievanceCreate, user_id: i
 
 def assign_grievances_to_employees(db: Session):
     # All unassigned grievances
-    pend = db.query(models.Grievance)\
-             .filter(models.Grievance.assigned_to.is_(None))\
-             .all()
-    # All employees
-    emps = db.query(User).filter(User.role == RoleEnum.employee).all()
-    if not emps:
-        return
-    # Round-robin assign
-    for i, g in enumerate(pend):
-        g.assigned_to = emps[i % len(emps)].id
+    unassigned_grievances = db.query(models.Grievance) \
+        .filter(models.Grievance.assigned_to.is_(None)) \
+        .filter(models.Grievance.status == "pending") \
+        .all()
+
+    if not unassigned_grievances:
+        return  # No unassigned grievances to process
+
+    # Get all active employees
+    employees = db.query(User) \
+        .filter(User.role == "employee") \
+        .filter(User.is_active == True) \
+        .all()
+
+    if not employees:
+        return  # No employees available for assignment
+
+    # Randomly assign grievances to employees
+    for grievance in unassigned_grievances:
+        # Select a random employee
+        random_employee = random.choice(employees)
+        grievance.assigned_to = random_employee.id
+        grievance.status = "in_progress"  # Update status to in_progress when assigned
+
     db.commit()
 
 def get_grievance_by_ticket_id(db: Session, ticket_id: str):
@@ -114,3 +129,26 @@ def transfer_grievance_department(
     db.commit()
     db.refresh(grievance)
     return grievance
+
+
+def get_grievances(db: Session, user: User):
+    query = db.query(models.Grievance) \
+        .options(
+        joinedload(models.Grievance.user),
+        joinedload(models.Grievance.department),
+        joinedload(models.Grievance.attachments)
+    )
+
+    # Super admin can see all grievances
+    if user.role != RoleEnum.super_admin:
+        # Regular users and employees see only their department's grievances
+        query = query.filter(models.Grievance.department_id == user.department_id)
+
+        # Regular users see only their own grievances
+        if user.role == RoleEnum.user:
+            query = query.filter(models.Grievance.user_id == user.id)
+        # Employees see all grievances in their department
+        elif user.role == RoleEnum.employee:
+            query = query.filter(models.Grievance.assigned_to == user.id)
+
+    return query.order_by(models.Grievance.created_at.desc()).all()

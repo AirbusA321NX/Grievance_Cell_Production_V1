@@ -11,6 +11,7 @@ from roles import RoleEnum
 from Department import models as dept_models
 from fastapi.responses import FileResponse
 from pathlib import Path
+from sqlalchemy.orm import joinedload
 from file_utils import save_upload_file, get_mime_type, delete_file
 
 # Role-based dependencies
@@ -110,14 +111,30 @@ async def create_grievance(
 def read_grievances(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    skip:  int =0,
+    limit : int = 100
 ):
+    query = db.query(models.Grievance)
     if current_user.role == RoleEnum.user:
-        return crud.get_grievances_by_user(db, current_user.id)
-    if current_user.role == RoleEnum.employee:
-        return crud.get_grievances_by_employee(db, current_user.id)
-    if current_user.role in (RoleEnum.admin, RoleEnum.super_admin):
-        return crud.get_all_grievances(db)
-    raise HTTPException(status_code=403, detail="Not authorized")
+        query = query.filter(models.Grievance.user_id == current_user.id)
+    elif current_user.role == RoleEnum.employee:
+        query = query.filter(
+            (models.Grievance.department_id == current_user.department_id) &
+            (models.Grievance.assigned_to == current_user.id)
+        )
+    elif current_user.role == RoleEnum.admin:
+        query = query.filter(models.Grievance.department_id == current_user.department_id)
+        # Super admin can see all grievances (no filter)
+
+        # Include related data
+    query = query.options(
+        joinedload(models.Grievance.user),
+        joinedload(models.Grievance.department),
+        joinedload(models.Grievance.assigned_to_user),
+        joinedload(models.Grievance.attachments)
+    ).order_by(models.Grievance.created_at.desc())
+
+    return query.offset(skip).limit(limit).all()
 
 @router.post("/assign", status_code=status.HTTP_204_NO_CONTENT)
 def assign_all(
@@ -266,3 +283,4 @@ async def download_attachment(
         filename=attachment.file_name,
         media_type=attachment.file_type
     )
+
