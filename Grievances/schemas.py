@@ -1,6 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel , validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List , Dict, ForwardRef
+
+
+UserOut = ForwardRef('UserOut')
 
 class GrievanceCreate(BaseModel):
     grievance: str
@@ -9,6 +12,14 @@ class GrievanceCreate(BaseModel):
     role: str
     department_id: int
     files: Optional[List[bytes]] = None
+
+class StatusHistoryOut(BaseModel):
+    status: str
+    changed_at: datetime
+    changed_by: UserOut
+
+    class Config:
+        orm_mode = True
 
 class GrievanceAttachmentOut(BaseModel):
     id: int
@@ -46,6 +57,22 @@ class GrievanceOut(BaseModel):
     status: str
     created_at: datetime
     attachments: List[AttachmentResponse] = []
+    status_history: List[StatusHistoryOut] = []
+    timeline: List[Dict] = []  # For the timeline view
+
+    @validator('timeline', pre=True, always=True)
+    def build_timeline(cls, v, values):
+        if 'status_history' in values:
+            return [
+                {
+                    "type": "status_change",
+                    "status": entry.status,
+                    "timestamp": entry.changed_at.isoformat(),
+                    "changed_by": entry.changed_by.email if entry.changed_by else "System"
+                }
+                for entry in values.get('status_history', [])
+            ]
+        return v
 
     class Config:
         orm_mode = True

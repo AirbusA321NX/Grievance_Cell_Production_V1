@@ -30,6 +30,7 @@ class Grievance(Base):
     resolved_at   = Column(DateTime(timezone=True), nullable=True)
     user = relationship("User", foreign_keys=[user_id])
     department = relationship("Department")
+    status_history = relationship("GrievanceStatusHistory", back_populates="grievance", cascade="all, delete-orphan")
     employee = relationship("User", foreign_keys=[assigned_to])
     resolver = relationship("User", foreign_keys=[resolved_by])
     attachments = relationship("GrievanceAttachment", back_populates="grievance", cascade="all, delete-orphan")
@@ -67,3 +68,16 @@ class GrievanceAttachment(Base):
 
         class Config:
             orm_mode = True
+
+    class GrievanceStatusHistory(Base):
+        __tablename__ = "grievance_status_history"
+
+        id = Column(Integer, primary_key=True, index=True)
+        grievance_id = Column(Integer, ForeignKey('grievances.id', ondelete="CASCADE"))
+        status = Column(String)
+        changed_at = Column(DateTime(timezone=True), server_default=func.now())
+        changed_by_id = Column(Integer, ForeignKey('users.id'))
+
+        # Relationships
+        grievance = relationship("Grievance", back_populates="status_history")
+        changed_by = relationship("User")
