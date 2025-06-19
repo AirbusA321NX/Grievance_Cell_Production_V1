@@ -12,7 +12,8 @@ def create_grievance(db: Session, grievance: schemas.GrievanceCreate, user_id: i
     db_g = models.Grievance(
         ticket_id=ticket,
         user_id=user_id,
-        department_id=grievance.department_id
+        department_id=grievance.department_id,
+        grievance_content=grievance.grievance
     )
     db.add(db_g)
     db.commit()

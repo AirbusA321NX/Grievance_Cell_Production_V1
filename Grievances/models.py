@@ -1,11 +1,15 @@
 from sqlalchemy import Column, Integer, ForeignKey, DateTime, String
 from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLEnum
+from pydantic import BaseModel
 from enum import Enum as PyEnum
 from sqlalchemy.sql import func
 from datetime import datetime
+from sqlalchemy.ext.hybrid import hybrid_property
+import os
+
 from database import Base
-from roles import RoleEnum
+
 
 class GrievanceStatus(str, PyEnum):
     pending = "pending"
@@ -18,13 +22,12 @@ class Grievance(Base):
     ticket_id = Column(String, unique=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     department_id = Column(Integer, ForeignKey("departments.id"))
+    grievance_content = Column(String)
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     status        = Column(SQLEnum(GrievanceStatus), default=GrievanceStatus.pending)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
-    # NEW fields:
     resolved_by   = Column(Integer, ForeignKey("users.id"), nullable=True)
     resolved_at   = Column(DateTime(timezone=True), nullable=True)
-
     user = relationship("User", foreign_keys=[user_id])
     department = relationship("Department")
     employee = relationship("User", foreign_keys=[assigned_to])
@@ -41,6 +44,26 @@ class GrievanceAttachment(Base):
     file_type = Column(String, nullable=False)  # MIME type
     file_size = Column(Integer, nullable=False)  # File size in bytes
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     # Relationship to grievance
     grievance = relationship("Grievance", back_populates="attachments")
+
+    @hybrid_property
+    def file_url(self):
+        return f"/grievances/attachments/{self.id}"
+
+    @file_url.expression
+    def file_url(cls):
+        return func.concat("/grievances/attachments/", cls.id)
+
+    class GrievanceAttachmentResponse(BaseModel):
+        id: int
+        file_name: str
+        file_path: str
+        file_url: str
+        file_type: str
+        file_size: int
+        created_at: datetime
+
+        class Config:
+            orm_mode = True

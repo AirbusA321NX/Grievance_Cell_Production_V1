@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from Grievances import models as grievance_models
 from database import engine, Base
 from Department.APIs import router as dept_router
 from User.APIs import router as user_router
@@ -17,7 +17,7 @@ Base.metadata.create_all(bind=engine)
 dept_models.Base.metadata.create_all(bind=engine)
 user_models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(debug=True)
 
 # Register routers
 app.include_router(dept_router)

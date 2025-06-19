@@ -45,7 +45,7 @@ async def create_grievance(
     # Initialize variables at the start
     db_grievance = None
     file_path = None
-    attachment = None
+
 
     try:
         # Create the grievance using the GrievanceCreate schema
@@ -76,6 +76,8 @@ async def create_grievance(
                             file_size=file_size
                         )
                         db.add(attachment)
+                        db.flush()
+
 
                     except Exception as file_error:
                         # If file upload fails, clean up and re-raise

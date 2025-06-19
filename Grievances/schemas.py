@@ -10,6 +10,18 @@ class GrievanceCreate(BaseModel):
     department_id: int
     files: Optional[List[bytes]] = None
 
+class GrievanceAttachmentOut(BaseModel):
+    id: int
+    file_name: str
+    file_path: str
+    file_url: str  # Add this line
+    file_type: str
+    file_size: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
 class AttachmentBase(BaseModel):
         file_name: str
         file_type: str
