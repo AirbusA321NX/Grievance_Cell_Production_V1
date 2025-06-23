@@ -35,3 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/test")
+async def test_route():
+    return {"message": "API is working"}

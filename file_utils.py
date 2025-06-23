@@ -1,4 +1,3 @@
-# D:\pycharm\Grievance_Cell_Production_V1\file_utils.py
 import os
 import uuid
 from pathlib import Path

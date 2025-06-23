@@ -1,18 +1,21 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, status , Form , UploadFile , File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session , joinedload
 from typing import List , Optional
 from fastapi.security import HTTPBearer
-from Grievances import crud, schemas , models
-from User.models import User
+from Grievances import crud
 from database import get_db
-from dependencies import get_current_active_user, RoleChecker
 from roles import RoleEnum
 from Department import models as dept_models
 from fastapi.responses import FileResponse
+from dependencies import get_current_active_user, RoleChecker
 from pathlib import Path
-from sqlalchemy.orm import joinedload
 from file_utils import save_upload_file, get_mime_type, delete_file
+from . import models, schemas
+from User.models import User
+import os
+import uuid
+from .models import GrievanceStatus, GrievanceStatusHistory
 
 # Role-based dependencies
 admin_only = RoleChecker([RoleEnum.admin, RoleEnum.super_admin])
@@ -30,83 +33,71 @@ async def create_grievance(
         department_id: int = Form(...),
         files: Optional[List[UploadFile]] = File(None),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_active_user),
+        current_user: User = Depends(user_only),  # Only users can create grievances
 ):
     """
     Create a new grievance with optional file attachments.
-    Only users can create grievances.
     """
-    # Only users can raise grievances
-    if current_user.role != RoleEnum.user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only users can create grievances"
-        )
-
-    # Initialize variables at the start
     db_grievance = None
-    file_path = None
-
-
     try:
-        # Create the grievance using the GrievanceCreate schema
-        grievance_data = schemas.GrievanceCreate(
-            grievance=grievance,
-            department_id=department_id,
+        # Create the grievance
+        db_grievance = models.Grievance(
+            ticket_id=str(uuid.uuid4()),
             user_id=current_user.id,
-            role=current_user.role.value
+            department_id=department_id,
+            grievance_content=grievance,
+            status=GrievanceStatus.pending
         )
+        db.add(db_grievance)
+        db.commit()
+        db.refresh(db_grievance)
 
-        # Create the grievance using crud
-        db_grievance = crud.create_grievance(db, grievance_data, current_user.id)
-
-        # Process file uploads if any
+        # Handle file uploads if any
         if files:
             for file in files:
-                if file and file.filename:  # Check if file exists and has a name
-                    try:
-                        # Save the file
-                        file_path, original_filename, file_size = await save_upload_file(file)
+                # Save the file and get its details
+                file_path = await save_upload_file(file)
+                file_size = os.path.getsize(file_path)
+                file_type = get_mime_type(file_path)
 
-                        # Create attachment record
-                        attachment = models.GrievanceAttachment(
-                            grievance_id=db_grievance.id,
-                            file_path=file_path,
-                            file_name=original_filename,
-                            file_type=file.content_type or get_mime_type(original_filename),
-                            file_size=file_size
-                        )
-                        db.add(attachment)
-                        db.flush()
-
-
-                    except Exception as file_error:
-                        # If file upload fails, clean up and re-raise
-                        if file_path and os.path.exists(file_path):
-                            delete_file(file_path)
-                        raise file_error
+                # Create attachment record
+                attachment = models.GrievanceAttachment(
+                    grievance_id=db_grievance.id,
+                    file_path=str(file_path),
+                    file_name=file.filename,
+                    file_type=file_type,
+                    file_size=file_size
+                )
+                db.add(attachment)
 
             db.commit()
             db.refresh(db_grievance)
 
+        # Create initial status history
+        status_history = models.GrievanceStatusHistory(
+            grievance_id=db_grievance.id,
+            status=GrievanceStatus.pending,
+            changed_by_id=current_user.id
+        )
+        db.add(status_history)
+        db.commit()
+        db.refresh(db_grievance)
+
         return db_grievance
 
     except Exception as e:
-        db.rollback()
-        # Clean up any uploaded files if there was an error
-        if db_grievance and files:
-            for file in files:
-                if (file and hasattr(file, 'filename') and file.filename and
-                        file_path and os.path.exists(file_path)):
-                    try:
-                        delete_file(file_path)
-                    except Exception:
-                        pass  # Don't let cleanup errors mask the original error
-
+        # Clean up in case of error
+        if db_grievance and db_grievance.id:
+            if files:
+                for file in files:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+            db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating grievance: {str(e)}"
         )
+
 @router.get("/", response_model=List[schemas.GrievanceOut])
 def read_grievances(
     db: Session = Depends(get_db),
@@ -284,3 +275,83 @@ async def download_attachment(
         media_type=attachment.file_type
     )
 
+
+@router.get("/test", response_model=List[schemas.GrievanceOut])
+def test_endpoint(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_active_user)
+):
+    """
+    Test endpoint to check if the API is working.
+    """
+    # Simple query without complex joins
+    grievances = db.query(models.Grievance).filter(
+        models.Grievance.user_id == current_user.id
+    ).limit(10).all()
+
+    # Convert to list of dicts
+    result = []
+    for g in grievances:
+        result.append({
+            **g.__dict__,
+            "attachments": [a.__dict__ for a in g.attachments],
+            "status_history": [
+                {
+                    "status": h.status,
+                    "changed_at": h.changed_at,
+                    "changed_by": {
+                        "id": h.changed_by.id,
+                        "email": h.changed_by.email
+                    } if h.changed_by else None
+                }
+                for h in g.status_history
+            ]
+        })
+
+    return result
+
+@router.get("/", response_model=List[schemas.GrievanceOut])
+def list_grievances(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    department_id: Optional[int] = None,
+    assigned_to: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    List all grievances with filtering options.
+    - Admins see all grievances
+    - Employees see assigned grievances
+    - Users see only their own grievances
+    """
+    query = db.query(models.Grievance).options(
+        joinedload(models.Grievance.user),
+        joinedload(models.Grievance.department),
+        joinedload(models.Grievance.employee),
+        joinedload(models.Grievance.status_history).joinedload(models.GrievanceStatusHistory.changed_by),
+        joinedload(models.Grievance.attachments)
+    )
+
+    # Apply role-based filtering
+    if current_user.role == RoleEnum.user:
+        query = query.filter(models.Grievance.user_id == current_user.id)
+    elif current_user.role == RoleEnum.employee:
+        query = query.filter(
+            (models.Grievance.assigned_to == current_user.id) |
+            (models.Grievance.user_id == current_user.id)
+        )
+    # Admin can see all, no additional filter needed
+
+    # Apply filters
+    if status:
+        query = query.filter(models.Grievance.status == status)
+    if department_id:
+        query = query.filter(models.Grievance.department_id == department_id)
+    if assigned_to is not None:
+        query = query.filter(models.Grievance.assigned_to == assigned_to)
+
+    # Apply pagination
+    grievances = query.offset(skip).limit(limit).all()
+    return grievances

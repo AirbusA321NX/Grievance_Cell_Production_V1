@@ -1,13 +1,12 @@
 # User/schemas.py
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from pydantic.networks import EmailStr
-from typing import Optional, List, ForwardRef
+from typing import Optional, List, ForwardRef , Dict , Any
 from roles import RoleEnum
 from datetime import datetime
-from Grievances.schemas import GrievanceAttachmentOut
-from Grievances.models import GrievanceStatus, Grievance
 
 # Forward references
+GrievanceAttachmentOut = ForwardRef('GrievanceAttachmentOut')
 
 class PasswordReset(BaseModel):
     email: EmailStr
@@ -69,7 +68,7 @@ class UserOut(BaseModel):
     department: Optional[DepartmentOut] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class GrievanceOut(BaseModel):
@@ -78,18 +77,17 @@ class GrievanceOut(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     status: str
-    user: UserOut
-    department: DepartmentOut
+    user: 'UserOut'
+    department: 'DepartmentOut'
     assigned_to: Optional[UserOut] = None
     resolved_by: Optional[UserOut] = None
     resolved_at: Optional[datetime] = None
-    attachments: List[GrievanceAttachmentOut] = []
+    attachments: List[Dict[str, Any]] = []
     grievance_content: str  # Added this field
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
+if __name__ != "__main__":
 
-# Update forward references
-UserOut.update_forward_refs()
-GrievanceOut.update_forward_refs()
+    pass

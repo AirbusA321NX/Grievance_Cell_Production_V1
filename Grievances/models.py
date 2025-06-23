@@ -6,6 +6,7 @@ from enum import Enum as PyEnum
 from sqlalchemy.sql import func
 from datetime import datetime
 from sqlalchemy.ext.hybrid import hybrid_property
+from database import Base
 import os
 
 from database import Base
@@ -15,6 +16,7 @@ class GrievanceStatus(str, PyEnum):
     pending = "pending"
     solved = "solved"
     not_solved = "not_solved"
+    closed = "closed"
 
 class Grievance(Base):
     __tablename__ = "grievances"
@@ -35,15 +37,34 @@ class Grievance(Base):
     resolver = relationship("User", foreign_keys=[resolved_by])
     attachments = relationship("GrievanceAttachment", back_populates="grievance", cascade="all, delete-orphan")
 
+
+
+class GrievanceStatusHistory(Base):
+    __tablename__ = "grievance_status_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    grievance_id = Column(Integer, ForeignKey('grievances.id', ondelete="CASCADE"))
+    status = Column(String)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now())
+    changed_by_id = Column(Integer, ForeignKey('users.id'))
+    notes = Column(String, nullable=True)
+
+    grievance = relationship("Grievance", back_populates="status_history")
+    changed_by = relationship("User")
+
+    def __repr__(self):
+        return f"<GrievanceStatusHistory {self.id} - {self.status}>"
+
+
 class GrievanceAttachment(Base):
     __tablename__ = "grievance_attachments"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     grievance_id = Column(Integer, ForeignKey("grievances.id", ondelete="CASCADE"), nullable=False)
-    file_path = Column(String, nullable=False)  # Path where the file is stored
-    file_name = Column(String, nullable=False)  # Original file name
-    file_type = Column(String, nullable=False)  # MIME type
-    file_size = Column(Integer, nullable=False)  # File size in bytes
+    file_path = Column(String, nullable=False)
+    file_name = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationship to grievance
@@ -67,17 +88,4 @@ class GrievanceAttachment(Base):
         created_at: datetime
 
         class Config:
-            orm_mode = True
-
-    class GrievanceStatusHistory(Base):
-        __tablename__ = "grievance_status_history"
-
-        id = Column(Integer, primary_key=True, index=True)
-        grievance_id = Column(Integer, ForeignKey('grievances.id', ondelete="CASCADE"))
-        status = Column(String)
-        changed_at = Column(DateTime(timezone=True), server_default=func.now())
-        changed_by_id = Column(Integer, ForeignKey('users.id'))
-
-        # Relationships
-        grievance = relationship("Grievance", back_populates="status_history")
-        changed_by = relationship("User")
+            from_attributes = True

@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session , joinedload
 from . import models, schemas
 from User.models import User
 from .models import GrievanceStatus
