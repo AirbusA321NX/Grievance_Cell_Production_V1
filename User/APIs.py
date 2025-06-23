@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status , Query
 from sqlalchemy.orm import Session
-from typing import List, Union
+from sqlalchemy import or_
+from typing import List, Union , Optional
 import traceback
+from datetime  import datetime
 from database import get_db
 from dependencies import get_current_active_user, RoleChecker
 from roles import RoleEnum as Role
 from Grievances import models as grievance_models
 from Grievances import schemas as grievance_schemas
 from . import models, schemas, crud
+from Grievances.models import GrievanceStatus
 from sqlalchemy.orm import joinedload
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -71,10 +74,21 @@ def get_user(
 @router.get("/grievances/", response_model=List[grievance_schemas.GrievanceOut],
            operation_id="list_user_grievances")
 def list_user_grievances(
-    db: Session = Depends(get_db),
+db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    # New query parameters for filtering
+    status: Optional[GrievanceStatus] = None,
+    user_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    assigned_to: Optional[int] = None,
+    search: Optional[str] = None,
+    created_after: Optional[datetime] = None,
+    created_before: Optional[datetime] = None,
+    # Sorting parameters
+    sort_by: str = Query("created_at", description="Field to sort by (created_at, status, user_id, department_id)"),
+    sort_order: str = Query("desc", description="Sort order (asc or desc)")
 ):
     query = db.query(grievance_models.Grievance)
 
@@ -87,6 +101,37 @@ def list_user_grievances(
         )
     elif current_user.role == Role.admin:
         query = query.filter(grievance_models.Grievance.department_id == current_user.department_id)
+
+        if status:
+            query = query.filter(grievance_models.Grievance.status == status)
+        if user_id:
+            query = query.filter(grievance_models.Grievance.user_id == user_id)
+        if department_id:
+            query = query.filter(grievance_models.Grievance.department_id == department_id)
+        if assigned_to:
+            query = query.filter(grievance_models.Grievance.assigned_to == assigned_to)
+        if created_after:
+            query = query.filter(grievance_models.Grievance.created_at >= created_after)
+        if created_before:
+            query = query.filter(grievance_models.Grievance.created_at <= created_before)
+        if search:
+            search = f"%{search}%"
+            query = query.filter(
+                or_(
+                    grievance_models.Grievance.grievance_content.ilike(search),
+                    grievance_models.Grievance.ticket_id.ilike(search)
+                )
+            )
+
+            # Apply sorting
+        sort_field = getattr(grievance_models.Grievance, sort_by, None)
+        if sort_field is None:
+            sort_field = grievance_models.Grievance.created_at
+
+        if sort_order.lower() == "asc":
+            query = query.order_by(sort_field.asc())
+        else:
+            query = query.order_by(sort_field.desc())
 
     query = query.options(
         joinedload(grievance_models.Grievance.user),
