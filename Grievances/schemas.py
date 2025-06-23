@@ -6,7 +6,7 @@ class StatusHistoryOut(BaseModel):
     id: int
     status: str
     changed_at: datetime
-    changed_by: Dict[str, Any]  # Will be populated with user info
+    changed_by: Dict[str, Any]
 
     class Config:
         from_attributes = True

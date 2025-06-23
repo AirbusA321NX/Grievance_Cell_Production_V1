@@ -1,4 +1,3 @@
-# User/schemas.py
 from pydantic import BaseModel
 from pydantic.networks import EmailStr
 from typing import Optional, List, ForwardRef , Dict , Any

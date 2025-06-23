@@ -1,10 +1,8 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
 from Department.models import Department
-from Department.crud import create_department, get_departments
 from passlib.context import CryptContext
 from typing import List , Optional
-import pdb
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_password_hash(password: str) -> str:

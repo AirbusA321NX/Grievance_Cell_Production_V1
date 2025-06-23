@@ -1,4 +1,3 @@
-# roles.py
 from enum import Enum
 
 class RoleEnum(str, Enum):

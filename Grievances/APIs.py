@@ -1,4 +1,3 @@
-import os
 from fastapi import APIRouter, Depends, HTTPException, status , Form , UploadFile , File
 from sqlalchemy.orm import Session , joinedload
 from typing import List , Optional
@@ -15,7 +14,7 @@ from . import models, schemas
 from User.models import User
 import os
 import uuid
-from .models import GrievanceStatus, GrievanceStatusHistory
+from .models import GrievanceStatus
 
 # Role-based dependencies
 admin_only = RoleChecker([RoleEnum.admin, RoleEnum.super_admin])

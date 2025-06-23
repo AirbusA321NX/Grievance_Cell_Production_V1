@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from Grievances import models as grievance_models
 from database import engine, Base
 from Department.APIs import router as dept_router
 from User.APIs import router as user_router

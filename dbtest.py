@@ -1,7 +1,4 @@
 from database import engine, Base
-from Grievances import models
-from User import models as user_models
-from Department import models as dept_models
 from sqlalchemy import inspect
 
 

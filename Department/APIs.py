@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from Department import crud, schemas, models
+from Department import crud, schemas
 from database import get_db
 from dependencies import get_current_active_user, RoleChecker
 from roles import RoleEnum as Role

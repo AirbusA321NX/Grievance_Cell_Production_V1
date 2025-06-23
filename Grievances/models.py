@@ -6,8 +6,6 @@ from enum import Enum as PyEnum
 from sqlalchemy.sql import func
 from datetime import datetime
 from sqlalchemy.ext.hybrid import hybrid_property
-from database import Base
-import os
 
 from database import Base
 
