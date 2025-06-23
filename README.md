@@ -38,6 +38,8 @@ The Grievance Cell System is a modular, FastAPI-based backend application design
 * **Timestamps & Auditing**: Creation and resolution timestamps, plus `resolved_by` tracking.
 * **Comments**: Inline commenting on grievances with user and timestamp metadata.
 * **Modular Structure**: Separate folders for each domain (User, Department, Grievances, Comments).
+* **🔍 Substring Search**: Search grievances by keywords (title, description, or ticket ID)
+* **📊 Sorting Support**: Sort grievances by status, date, or department
 
 ---
 
@@ -148,6 +150,98 @@ POST   /comments/                       # Add comment
 GET    /comments/grievance/{id}        # List comments for grievance
 DELETE /comments/{id}                  # Delete comment (owner/admin)
 ```
+
+## 🔍 Advanced Filtering and Sorting
+
+The system provides robust dynamic filtering, substring search, and multi-field sorting features that allow users, employees, and administrators to efficiently navigate and manage grievances from a large dataset.
+
+### ✅ Endpoint
+
+GET /grievances/
+
+---
+
+### 🔧 Supported Features
+
+- 🔎 Substring-based search over:
+  - Grievance content (description)
+  - Ticket ID
+- 🏷️ Filtering by:
+  - Grievance status (e.g., OPEN, RESOLVED)
+  - User ID
+  - Department ID
+  - Assigned employee ID
+  - Created date range (`created_after` and `created_before`)
+- ⏫ Sorting:
+  - Any valid field such as `created_at`, `status`, `user_id`, `department_id`, `ticket_id`
+  - Order by ascending or descending
+- 🔁 Pagination:
+  - Skip & limit parameters for paged browsing
+
+---
+
+### 🧩 Query Parameters
+
+| Parameter        | Type      | Default      | Description                                                         |
+|------------------|-----------|--------------|---------------------------------------------------------------------|
+| `skip`           | int       | 0            | Number of records to skip (pagination start index)                 |
+| `limit`          | int       | 100          | Number of records to return (page size)                            |
+| `status`         | Enum      | None         | Filter grievances by status                                        |
+| `user_id`        | int       | None         | Filter by user who raised the grievance                            |
+| `department_id`  | int       | None         | Filter by department ID                                            |
+| `assigned_to`    | int       | None         | Filter by employee ID assigned to the grievance                    |
+| `created_after`  | datetime  | None         | Filter grievances created after this timestamp                     |
+| `created_before` | datetime  | None         | Filter grievances created before this timestamp                    |
+| `search`         | string    | None         | Substring match on grievance content or ticket ID                  |
+| `sort_by`        | string    | created_at   | Field to sort by (must be a valid column)                          |
+| `sort_order`     | string    | desc         | Sorting order (`asc` or `desc`)                                    |
+
+---
+
+### 💡 Example Usage
+
+- Search for grievances that contain the keyword "internet":
+
+
+- List grievances with status = "OPEN", sorted by creation date ascending:
+
+- Filter grievances created after January 1, 2024, and assigned to employee ID 5:
+
+- Return 10 grievances starting from the 11th record (pagination):
+
+
+---
+
+### 🛠 Developer Notes (Backend Logic)
+
+The grievance filtering and sorting logic follows the steps below:
+
+1. Start with a base SQLAlchemy query on the Grievance model.
+2. Apply role-based access filters:
+ - If the user is a normal user: filter grievances submitted by them.
+ - If the user is an employee: filter grievances in their department and assigned to them.
+ - If the user is an admin: filter grievances only within their department.
+3. Apply optional filters (if provided in the query parameters):
+ - Filter by status, user_id, department_id, assigned_to.
+ - Filter by creation date range (created_after, created_before).
+ - Perform a case-insensitive partial match (ILIKE) on grievance description and ticket ID if a search term is provided.
+4. Determine the field to sort by (`sort_by`):
+ - Validate the field against known columns.
+ - Default to `created_at` if an invalid field is given.
+5. Apply sorting direction (`asc` or `desc`).
+6. Apply pagination using offset and limit.
+7. Use eager loading (`joinedload`) to prefetch related models such as:
+ - User (grievance submitter)
+ - Department
+ - Assigned employee
+ - Attachments
+8. Execute the final query and return the grievance list.
+
+---
+
+This modular design supports flexible querying and is easily extendable for future enhancements such as priority filters, tags, or additional user roles.
+
+
 
 ---
 
