@@ -19,7 +19,7 @@ router = APIRouter(prefix="/users", tags=["Users"])
 role_admin_employee_super = RoleChecker([Role.admin, Role.employee, Role.super_admin])
 role_admin = RoleChecker([Role.admin, Role.super_admin])
 
-@router.post("/", response_model=schemas.UserFull, operation_id="create_user")
+@router.post("/", response_model=schemas.UserFull, operation_id="create_new_user")
 def create_user(
     user: schemas.UserCreate,
     db: Session = Depends(get_db),
