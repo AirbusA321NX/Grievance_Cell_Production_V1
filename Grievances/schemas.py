@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator , Field
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -35,10 +35,26 @@ class GrievanceBase(BaseModel):
 class GrievanceCreate(GrievanceBase):
     pass
 
+class GrievanceTransferRequest(BaseModel):
+    new_department_id: int
+    notes: Optional[str] = None
+
+class GrievanceStatusUpdate(BaseModel):
+    status: str  # e.g., "open", "in_progress", "resolved", "closed"
+    notes: Optional[str] = None
+
 class GrievanceUpdate(BaseModel):
     status: Optional[str] = None
     assigned_to: Optional[int] = None
 
+
+class GrievanceSearchResult(BaseModel):
+    data: List['GrievanceOut']
+    total_count: int
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        from_attributes = True
 
 
 class GrievanceOut(GrievanceBase):

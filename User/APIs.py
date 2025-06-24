@@ -12,6 +12,11 @@ from Grievances import schemas as grievance_schemas
 from . import models, schemas, crud
 from Grievances.models import GrievanceStatus
 from sqlalchemy.orm import joinedload
+from schemas.base import PaginatedResponse #dont remove
+from .schemas import UserFull, UserLimited
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -41,16 +46,54 @@ def create_user(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/", response_model=List[Union[schemas.UserLimited, schemas.UserFull]],
-           operation_id="list_users")
+
+@router.get("/", response_model=List[schemas.UserFull])
 def list_users(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user),
+        skip: int = 0,
+        limit: int = Query(100, le=200, description="Number of records per page (max 200)"),
+        search: Optional[str] = None
 ):
-    users = crud.get_users(db)
-    if current_user.role == Role.user:
-        return [schemas.UserLimited.from_orm(u) for u in users]
-    return [schemas.UserFull.from_orm(u) for u in users]
+    """
+    List all users with pagination and search.
+    Only administrators can view all users.
+
+    Search fields:
+    - name: Case-insensitive search in user's name
+    - email: Case-insensitive search in user's email
+    """
+    # Check admin access
+    if current_user.role not in [Role.admin, Role.super_admin]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can view all users"
+        )
+
+    # Base query
+    query = db.query(models.User)
+
+    # Apply search filter if provided
+    if search:
+        search = f"%{search}%"
+        query = query.filter(
+            or_(
+                models.User.name.ilike(search),
+                models.User.email.ilike(search)
+            )
+        )
+
+    total = query.count()
+
+    # Apply pagination and return results
+    items = query.offset(skip).limit(limit).all()
+
+    return {
+        "items": [UserFull.from_orm(u) for u in items],
+        "total": total,
+        "limit": limit,
+        "offset": skip
+    }
 
 @router.get("/{user_id}", response_model=Union[schemas.UserLimited, schemas.UserFull],
            operation_id="get_user")
@@ -71,27 +114,46 @@ def get_user(
 
     raise HTTPException(status_code=403, detail="Not authorized")
 
-@router.get("/grievances/", response_model=List[grievance_schemas.GrievanceOut],
-           operation_id="list_user_grievances")
+@router.get("/grievances/", response_model=List[grievance_schemas.GrievanceOut])
 def list_user_grievances(
-db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user),
-    skip: int = 0,
-    limit: int = 100,
-    # New query parameters for filtering
-    status: Optional[GrievanceStatus] = None,
-    user_id: Optional[int] = None,
-    department_id: Optional[int] = None,
-    assigned_to: Optional[int] = None,
-    search: Optional[str] = None,
-    created_after: Optional[datetime] = None,
-    created_before: Optional[datetime] = None,
-    # Sorting parameters
-    sort_by: str = Query("created_at", description="Field to sort by (created_at, status, user_id, department_id)"),
-    sort_order: str = Query("desc", description="Sort order (asc or desc)")
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user),
+        skip: int = 0,
+        limit: int = Query(100, le=200, description="Number of records per page (max 200)"),
+        # Filter parameters
+        status: Optional[GrievanceStatus] = None,
+        user_id: Optional[int] = None,
+        department_id: Optional[int] = None,
+        assigned_to: Optional[int] = None,
+        search: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        # Sorting parameters
+        sort_by: str = Query("created_at",
+                             description="Field to sort by (created_at, status, user_id, department_id)"),
+        sort_order: str = Query("desc",
+                                description="Sort order (asc or desc)",
+                                regex="^(asc|desc)$")
 ):
-    query = db.query(grievance_models.Grievance)
+    """
+    List grievances with advanced filtering, sorting, and pagination.
 
+    Permissions:
+    - Regular users: Can only see their own grievances
+    - Employees: Can see grievances in their department assigned to them
+    - Admins: Can see all grievances in their department with filtering options
+    - Super Admins: Can see all grievances across departments with full filtering
+    """
+    # Base query with eager loading
+    query = db.query(grievance_models.Grievance).options(
+        joinedload(grievance_models.Grievance.user),
+        joinedload(grievance_models.Grievance.department),
+        joinedload(grievance_models.Grievance.employee),
+        joinedload(grievance_models.Grievance.attachments),
+        joinedload(grievance_models.Grievance.status_history)
+    )
+
+    # Role-based filtering
     if current_user.role == Role.user:
         query = query.filter(grievance_models.Grievance.user_id == current_user.id)
     elif current_user.role == Role.employee:
@@ -99,47 +161,56 @@ db: Session = Depends(get_db),
             (grievance_models.Grievance.department_id == current_user.department_id) &
             (grievance_models.Grievance.assigned_to == current_user.id)
         )
-    elif current_user.role == Role.admin:
-        query = query.filter(grievance_models.Grievance.department_id == current_user.department_id)
+    elif current_user.role in [Role.admin, Role.super_admin]:
+        # Admins can only see their department's grievances unless super admin
+        if current_user.role == Role.admin:
+            query = query.filter(
+                grievance_models.Grievance.department_id == current_user.department_id
+            )
 
+        # Additional filters for admin/super_admin
         if status:
             query = query.filter(grievance_models.Grievance.status == status)
         if user_id:
             query = query.filter(grievance_models.Grievance.user_id == user_id)
         if department_id:
-            query = query.filter(grievance_models.Grievance.department_id == department_id)
-        if assigned_to:
-            query = query.filter(grievance_models.Grievance.assigned_to == assigned_to)
-        if created_after:
-            query = query.filter(grievance_models.Grievance.created_at >= created_after)
-        if created_before:
-            query = query.filter(grievance_models.Grievance.created_at <= created_before)
-        if search:
-            search = f"%{search}%"
-            query = query.filter(
-                or_(
-                    grievance_models.Grievance.grievance_content.ilike(search),
-                    grievance_models.Grievance.ticket_id.ilike(search)
+            if current_user.role == Role.super_admin:  # Only super admin can filter by any department
+                query = query.filter(
+                    grievance_models.Grievance.department_id == department_id
                 )
+        if assigned_to:
+            query = query.filter(
+                grievance_models.Grievance.assigned_to == assigned_to
             )
 
-            # Apply sorting
-        sort_field = getattr(grievance_models.Grievance, sort_by, None)
-        if sort_field is None:
-            sort_field = grievance_models.Grievance.created_at
+    # Apply global filters (for all roles)
+    if created_after:
+        query = query.filter(grievance_models.Grievance.created_at >= created_after)
+    if created_before:
+        query = query.filter(grievance_models.Grievance.created_at <= created_before)
+    if search:
+        search = f"%{search}%"
+        query = query.filter(
+            or_(
+                grievance_models.Grievance.grievance_content.ilike(search),
+                grievance_models.Grievance.ticket_id.ilike(search)
+            )
+        )
 
-        if sort_order.lower() == "asc":
-            query = query.order_by(sort_field.asc())
-        else:
-            query = query.order_by(sort_field.desc())
+    # Apply sorting
+    sort_field = getattr(
+        grievance_models.Grievance,
+        sort_by if hasattr(grievance_models.Grievance, sort_by) else "created_at",
+        grievance_models.Grievance.created_at
+    )
 
-    query = query.options(
-        joinedload(grievance_models.Grievance.user),
-        joinedload(grievance_models.Grievance.department),
-        joinedload(grievance_models.Grievance.employee),
-        joinedload(grievance_models.Grievance.attachments)
-    ).order_by(grievance_models.Grievance.created_at.desc())
+    # Apply sort order
+    if sort_order.lower() == "asc":
+        query = query.order_by(sort_field.asc())
+    else:
+        query = query.order_by(sort_field.desc())
 
+    # Apply pagination
     return query.offset(skip).limit(limit).all()
 
 @router.patch("/{user_id}/role", response_model=schemas.UserFull,

@@ -21,8 +21,19 @@ class UserBase(BaseModel):
 
 
 class UserLimited(UserBase):
-    # no department info here
-    pass
+    id: int
+    email: str
+    name: str
+    role: str
+    department_id: Optional[int] = None
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True  # This was called orm_mode in Pydantic v1
+        # For Pydantic v2 compatibility, also add:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class UserFull(BaseModel):
