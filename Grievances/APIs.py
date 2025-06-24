@@ -221,10 +221,10 @@ async def transfer_grievance_department(
         )
 
     # Check permissions
-    if current_user.role not in [RoleEnum.admin, RoleEnum.super_admin]:
+    if current_user.role not in [RoleEnum.employee,RoleEnum.admin, RoleEnum.super_admin]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can transfer grievances"
+            detail="Only employees and administrators can transfer grievances"
         )
 
     # For non-super admins, check department
@@ -234,6 +234,19 @@ async def transfer_grievance_department(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Can only transfer grievances from your department"
             )
+
+    if current_user.role == RoleEnum.employee:
+        if grievance.department_id != current_user.department_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only transfer grievances from your department"
+            )
+
+    if current_user.role == RoleEnum.employee and grievance.assigned_to != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only transfer grievances assigned to you"
+        )
 
     # Check if new department exists
     new_department = db.query(dept_models.Department).filter(
@@ -684,7 +697,7 @@ def list_grievances_by_department(
     - Super admins see all departments
     - Admins see only their department
     - Employees see only their department
-    - Users see empty response (they should use the regular grievances endpoint)
+    - Users see empty response (they should use the regular grievances' endpoint)
     """
     # For regular users, return empty as they should use the regular grievances endpoint
     if current_user.role == RoleEnum.user:
