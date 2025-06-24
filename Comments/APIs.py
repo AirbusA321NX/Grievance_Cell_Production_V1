@@ -26,7 +26,8 @@ def get_comments(
         current_user: user_models.User = Depends(get_current_active_user),
         skip: int = 0,
         limit: int = Query(100, le=200, description="Number of records per page (max 200)"),
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'", regex="^(asc|desc)$")
 ):
     """
     Get comments for a specific grievance with pagination and search.
@@ -68,8 +69,10 @@ def get_comments(
             models.Comment.content.ilike(search)
         )
 
-    # Apply sorting (newest first)
-    query = query.order_by(models.Comment.created_at.desc())
+    if sort_order.lower() == "asc":
+        query = query.order_by(models.Comment.created_at.asc())
+    else:
+        query = query.order_by(models.Comment.created_at.desc())
 
     # Apply pagination and return results
     return query.offset(skip).limit(limit).all()

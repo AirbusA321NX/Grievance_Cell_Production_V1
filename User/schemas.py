@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel , Field
 from pydantic.networks import EmailStr
-from typing import Optional, List, ForwardRef , Dict , Any
+from typing import Optional, List, ForwardRef , Dict , Any , Literal
 from roles import RoleEnum
+from enum  import Enum
 from datetime import datetime
 
 # Forward references
@@ -80,6 +81,21 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True
 
+class UserSortBy(str, Enum):
+    name = "name"
+    email = "email"
+    created_at = "created_at"
+    updated_at = "updated_at"
+    last_login = "last_login"
+    department = "department"
+    role = "role"
+
+class UserSortRequest(BaseModel):
+    sort_by: UserSortBy = Field(default=UserSortBy.name)
+    sort_order: Literal["asc", "desc"] = Field(
+        default="desc",
+        description="Sort order: 'asc' for ascending, 'desc' for descending"
+    )
 
 class GrievanceOut(BaseModel):
     id: int

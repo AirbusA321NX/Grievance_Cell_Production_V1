@@ -1,6 +1,7 @@
-from pydantic import BaseModel, validator , Field
+from pydantic import BaseModel, validator , Field , constr
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any , Literal
+from enum import Enum
 
 class StatusHistoryOut(BaseModel):
     id: int
@@ -97,3 +98,25 @@ class GrievanceOut(GrievanceBase):
 
             class Config:
                 from_attributes = True
+
+
+class GrievanceSortBy(str, Enum):
+    created_at = "created_at"
+    updated_at = "updated_at"
+    resolved_at = "resolved_at"
+    status = "status"
+    priority = "priority"
+    department = "department"
+    assigned_to = "assigned_to"
+    created_by = "created_by"
+    resolved_by = "resolved_by"
+
+class GrievanceSortRequest(BaseModel):
+    sort_by: GrievanceSortBy = Field(
+        default=GrievanceSortBy.created_at,
+        description="Field to sort by"
+    )
+    sort_order: Literal["asc", "desc"] = Field(
+        default="desc",
+        description="Sort order: 'asc' for ascending, 'desc' for descending"
+    )

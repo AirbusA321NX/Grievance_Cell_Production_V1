@@ -404,25 +404,34 @@ def test_endpoint(
         "offset": skip
     }
 
-@router.get("/", response_model=List[schemas.GrievanceOut])
+
+@router.get("/", response_model=PaginatedResponse[schemas.GrievanceOut])
 def list_grievances(
-    skip: int = 0,
-    limit: int = 100,
-    status: Optional[str] = None,
-    department_id: Optional[int] = None,
-    assigned_to: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    search: Optional[str] = None,
-    sort_by: str = "created_at",
-    sort_order: str = "desc"
+        skip: int = 0,
+        limit: int = Query(100, le=200),
+        status: Optional[str] = None,
+        department_id: Optional[int] = None,
+        assigned_to: Optional[int] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        search: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_active_user),
 ):
     """
-    List all grievances with filtering options.
-    - Admins see all grievances
-    - Employees see assigned grievances
+    List all grievances with filtering, sorting, and pagination.
+    - Super admins see all grievances
+    - Admins see grievances from their department
+    - Employees see assigned grievances and their own
     - Users see only their own grievances
     """
+    # Import models locally to avoid circular imports
+    from User import models as user_models
+    from Department import models as dept_models
+
+    # Base query with eager loading
     query = db.query(models.Grievance).options(
         joinedload(models.Grievance.user),
         joinedload(models.Grievance.department),
@@ -437,9 +446,33 @@ def list_grievances(
     elif current_user.role == RoleEnum.employee:
         query = query.filter(
             (models.Grievance.assigned_to == current_user.id) |
-            (models.Grievance.user_id == current_user.id)
+            (models.Grievance.user_id == current_user.id) |
+            (models.Grievance.department_id == current_user.department_id)
         )
-    # Admin can see all, no additional filter needed
+    elif current_user.role == RoleEnum.admin:
+        query = query.filter(
+            models.Grievance.department_id == current_user.department_id
+        )
+    # Super admin can see all, no additional filter needed
+
+    # Apply search filter
+    if search:
+        search_term = f"%{search}%"
+        query = query.join(
+            user_models.User,
+            models.Grievance.user_id == user_models.User.id
+        ).join(
+            dept_models.Department,
+            models.Grievance.department_id == dept_models.Department.id
+        ).filter(
+            or_(
+                models.Grievance.grievance_content.ilike(search_term),
+                models.Grievance.ticket_id.ilike(search_term),
+                user_models.User.name.ilike(search_term),
+                dept_models.Department.name.ilike(search_term),
+                models.Grievance.status.ilike(search_term)
+            )
+        )
 
     # Apply filters
     if status:
@@ -448,17 +481,57 @@ def list_grievances(
         query = query.filter(models.Grievance.department_id == department_id)
     if assigned_to is not None:
         query = query.filter(models.Grievance.assigned_to == assigned_to)
+    if created_after:
+        query = query.filter(models.Grievance.created_at >= created_after)
+    if created_before:
+        query = query.filter(models.Grievance.created_at <= created_before)
+
+    # Apply sorting
+    sort_field = None
+    if sort_by == "created_at":
+        sort_field = models.Grievance.created_at
+    elif sort_by == "updated_at":
+        sort_field = models.Grievance.updated_at
+    elif sort_by == "resolved_at":
+        sort_field = models.Grievance.resolved_at
+    elif sort_by == "status":
+        sort_field = models.Grievance.status
+    elif sort_by == "priority":
+        sort_field = models.Grievance.priority
+    elif sort_by == "department":
+        query = query.join(dept_models.Department)
+        sort_field = dept_models.Department.name
+    elif sort_by == "assigned_to":
+        query = query.join(user_models.User, models.Grievance.assigned_to == user_models.User.id)
+        sort_field = user_models.User.name
+    elif sort_by == "created_by":
+        query = query.join(user_models.User, models.Grievance.user_id == user_models.User.id)
+        sort_field = user_models.User.name
+    elif sort_by == "resolved_by":
+        query = query.join(user_models.User, models.Grievance.resolved_by == user_models.User.id)
+        sort_field = user_models.User.name
+
+    # Apply sort order
+    if sort_field is not None:
+        if sort_order.lower() == "asc":
+            query = query.order_by(sort_field.asc())
+        else:
+            query = query.order_by(sort_field.desc())
+    else:
+        # Default sorting
+        query = query.order_by(models.Grievance.created_at.desc())
 
     # Apply pagination
     total = query.count()
     items = query.offset(skip).limit(limit).all()
 
     return {
-    "items": items,
-    "total": total,
-    "limit": limit,
-    "offset": skip
-}
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": skip
+    }
+
 class GrievanceResponse(schemas.GrievanceOut):
     user: Optional[Dict[str , Any]] = None
     department: Optional[Dict[str , Any]] = None
@@ -590,3 +663,105 @@ db: Session = Depends(get_db),
             "sort_order": sort_order
         }
     }
+
+
+@router.get("/by-department", response_model=Dict[int, PaginatedResponse[schemas.GrievanceOut]])
+def list_grievances_by_department(
+        skip: int = 0,
+        limit: int = Query(10, le=50, description="Number of records per department (max 50)"),
+        status: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        search: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_active_user),
+):
+    """
+    List grievances grouped by department with pagination, filtering, and sorting.
+
+    - Super admins see all departments
+    - Admins see only their department
+    - Employees see only their department
+    - Users see empty response (they should use the regular grievances endpoint)
+    """
+    # For regular users, return empty as they should use the regular grievances endpoint
+    if current_user.role == RoleEnum.user:
+        return {}
+
+    # Base query for departments
+    dept_query = db.query(dept_models.Department)
+
+    # Admin/Employee can only see their department
+    if current_user.role in [RoleEnum.admin, RoleEnum.employee]:
+        dept_query = dept_query.filter(dept_models.Department.id == current_user.department_id)
+    # Super admin can see all departments
+
+    departments = dept_query.all()
+    result = {}
+
+    for dept in departments:
+        # Base query for grievances in this department
+        query = db.query(models.Grievance).filter(
+            models.Grievance.department_id == dept.id
+        ).options(
+            joinedload(models.Grievance.user),
+            joinedload(models.Grievance.department),
+            joinedload(models.Grievance.employee),
+            joinedload(models.Grievance.attachments)
+        )
+
+        # Apply filters
+        if status:
+            query = query.filter(models.Grievance.status == status)
+        if created_after:
+            query = query.filter(models.Grievance.created_at >= created_after)
+        if created_before:
+            query = query.filter(models.Grievance.created_at <= created_before)
+        if search:
+            search_term = f"%{search}%"
+            query = query.join(
+                user_models.User,
+                models.Grievance.user_id == user_models.User.id
+            ).filter(
+                or_(
+                    models.Grievance.grievance_content.ilike(search_term),
+                    models.Grievance.ticket_id.ilike(search_term),
+                    user_models.User.name.ilike(search_term)
+                )
+            )
+
+        # Apply sorting
+        sort_field = None
+        if sort_by == "created_at":
+            sort_field = models.Grievance.created_at
+        elif sort_by == "updated_at":
+            sort_field = models.Grievance.updated_at
+        elif sort_by == "resolved_at":
+            sort_field = models.Grievance.resolved_at
+        elif sort_by == "status":
+            sort_field = models.Grievance.status
+        elif sort_by == "priority":
+            sort_field = models.Grievance.priority
+
+        if sort_field:
+            if sort_order.lower() == "asc":
+                query = query.order_by(sort_field.asc())
+            else:
+                query = query.order_by(sort_field.desc())
+        else:
+            query = query.order_by(models.Grievance.created_at.desc())
+
+        # Get total count and paginated results
+        total = query.count()
+        items = query.offset(skip).limit(limit).all()
+
+        result[dept.id] = {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": skip
+        }
+
+    return result

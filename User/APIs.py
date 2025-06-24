@@ -12,8 +12,8 @@ from Grievances import schemas as grievance_schemas
 from . import models, schemas, crud
 from Grievances.models import GrievanceStatus
 from sqlalchemy.orm import joinedload
-from schemas.base import PaginatedResponse #dont remove
-from .schemas import UserFull, UserLimited
+from schemas import PaginatedResponse
+from .schemas import UserFull
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
@@ -47,22 +47,47 @@ def create_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/", response_model=List[schemas.UserFull])
+@router.get("/", response_model=PaginatedResponse[UserFull])
 def list_users(
         db: Session = Depends(get_db),
         current_user: models.User = Depends(get_current_active_user),
         skip: int = 0,
         limit: int = Query(100, le=200, description="Number of records per page (max 200)"),
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        role: Optional[Role] = None,
+        department_id: Optional[int] = None,
+        is_active: Optional[bool] = None,
+        search_fields: Optional[List[str]] = None,
+        sort_by: str = "name",
+        sort_order: str = "asc",
 ):
     """
-    List all users with pagination and search.
-    Only administrators can view all users.
+    List all users with pagination, search, filtering, and sorting.
 
-    Search fields:
-    - name: Case-insensitive search in user's name
-    - email: Case-insensitive search in user's email
+    - Super admins can see all users
+    - Admins can see users in their department and all regular users
+
+    Search fields (when search parameter is provided):
+    - name: Search in user's name
+    - email: Search in user's email
+    - phone: Search in user's phone number
+    - department: Search in department name
+    - role: Search in role
+
+    Sort fields (sort_by parameter):
+    - name (default)
+    - email
+    - created_at
+    - updated_at
+    - last_login
+    - department (sorts by department name)
+    - role
+
+    Sort order: 'asc' (default) or 'desc'
     """
+    # Import models locally to avoid circular imports
+    from Department import models as dept_models
+
     # Check admin access
     if current_user.role not in [Role.admin, Role.super_admin]:
         raise HTTPException(
@@ -70,26 +95,96 @@ def list_users(
             detail="Only administrators can view all users"
         )
 
-    # Base query
-    query = db.query(models.User)
+    # Base query with eager loading
+    query = db.query(models.User).options(
+        joinedload(models.User.department)
+    )
 
-    # Apply search filter if provided
+    # Role-based filtering
+    if current_user.role == Role.admin:
+        query = query.filter(
+            (models.User.department_id == current_user.department_id) |
+            (models.User.role == Role.user)  # Admins can see all users in their dept + all regular users
+        )
+    # Super admin can see all users
+
+    # Apply filters
+    if role:
+        query = query.filter(models.User.role == role)
+    if department_id:
+        query = query.filter(models.User.department_id == department_id)
+    if is_active is not None:
+        query = query.filter(models.User.is_active == is_active)
+
+    # Apply search
     if search:
         search = f"%{search}%"
-        query = query.filter(
-            or_(
-                models.User.name.ilike(search),
-                models.User.email.ilike(search)
+        search_conditions = []
+
+        # If specific fields are provided, search only in those
+        if search_fields:
+            if "name" in search_fields:
+                search_conditions.append(models.User.name.ilike(search))
+            if "email" in search_fields:
+                search_conditions.append(models.User.email.ilike(search))
+            if "phone" in search_fields:
+                search_conditions.append(models.User.phone.ilike(search))
+            if "department" in search_fields:
+                query = query.join(dept_models.Department)
+                search_conditions.append(dept_models.Department.name.ilike(search))
+            if "role" in search_fields:
+                search_conditions.append(models.User.role.ilike(search))
+        else:
+            # Default search across all relevant fields
+            query = query.join(
+                dept_models.Department,
+                models.User.department_id == dept_models.Department.id,
+                isouter=True
             )
-        )
+            search_conditions = [
+                models.User.name.ilike(search),
+                models.User.email.ilike(search),
+                models.User.phone.ilike(search),
+                dept_models.Department.name.ilike(search),
+                models.User.role.ilike(search)
+            ]
 
+        query = query.filter(or_(*search_conditions))
+
+    # Apply sorting
+    sort_field = None
+    if sort_by == "name":
+        sort_field = models.User.name
+    elif sort_by == "email":
+        sort_field = models.User.email
+    elif sort_by == "created_at":
+        sort_field = models.User.created_at
+    elif sort_by == "updated_at":
+        sort_field = models.User.updated_at
+    elif sort_by == "last_login":
+        sort_field = models.User.last_login
+    elif sort_by == "department":
+        query = query.join(dept_models.Department)
+        sort_field = dept_models.Department.name
+    elif sort_by == "role":
+        sort_field = models.User.role
+
+    # Apply sort order
+    if sort_field is not None:
+        if sort_order.lower() == "asc":
+            query = query.order_by(sort_field.asc())
+        else:
+            query = query.order_by(sort_field.desc())
+    else:
+        # Default sorting
+        query = query.order_by(models.User.name.asc())
+
+    # Apply pagination
     total = query.count()
-
-    # Apply pagination and return results
-    items = query.offset(skip).limit(limit).all()
+    users = query.offset(skip).limit(limit).all()
 
     return {
-        "items": [UserFull.from_orm(u) for u in items],
+        "items": [schemas.UserFull.from_orm(u) for u in users],
         "total": total,
         "limit": limit,
         "offset": skip
